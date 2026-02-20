@@ -41,11 +41,6 @@ const ChatTab: React.FC<ChatTabProps> = ({ isDark }) => {
   const [searchQuery, setSearchQuery] = useState("");
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  const selectedConversationRef = useRef<Conversation | null>(null);
-  useEffect(() => {
-    selectedConversationRef.current = selectedConversation;
-  }, [selectedConversation]);
-
   // Group Management State
   const [isEditingGroup, setIsEditingGroup] = useState(false);
   const [groupName, setGroupName] = useState("");
@@ -173,34 +168,22 @@ const ChatTab: React.FC<ChatTabProps> = ({ isDark }) => {
         table: 'messages'
       }, (payload) => {
         const newMsg = payload.new as any;
-
-        setConversations(prev => {
-          let updated = [...prev];
-          const convoIndex = updated.findIndex(c => c.id === newMsg.conversation_id);
-
-          if (convoIndex > -1) {
-            const convo = { ...updated[convoIndex] } as any;
-            convo.last_message = newMsg;
-            convo.updated_at = newMsg.created_at;
-
-            if (newMsg.conversation_id !== selectedConversationRef.current?.id && newMsg.sender_id !== currentUser?.id) {
-              convo.unreadCount = (convo.unreadCount || 0) + 1;
-            }
-            updated[convoIndex] = convo;
-            updated.sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime());
-          }
-          return updated;
-        });
+        // If message is in a different conversation and not sent by me, increment unread
+        if (newMsg.conversation_id !== selectedConversation?.id && newMsg.sender_id !== currentUser?.id) {
+          setConversations(prev => prev.map(c =>
+            c.id === newMsg.conversation_id
+              ? { ...c, unreadCount: ((c as any).unreadCount || 0) + 1 }
+              : c
+          ));
+        }
       })
       .on('postgres_changes', {
         event: 'UPDATE',
         schema: 'public',
         table: 'messages'
-      }, (payload) => {
-        // We can optionally refresh messages state if a message read status changes
-        if (selectedConversationRef.current?.id === payload.new.conversation_id) {
-          setMessages(prev => prev.map(m => m.id === payload.new.id ? { ...m, ...payload.new } : m));
-        }
+      }, () => {
+        // Reload data when messages are updated (e.g., marked as read from another device)
+        loadData();
       })
       .subscribe();
 
@@ -258,10 +241,7 @@ const ChatTab: React.FC<ChatTabProps> = ({ isDark }) => {
           .single();
 
         const newMessage = { ...payload.new, sender: senderProfile } as Message;
-        setMessages(prev => {
-          if (prev.find(m => m.id === newMessage.id)) return prev;
-          return [...prev, newMessage];
-        });
+        setMessages(prev => [...prev, newMessage]);
 
         // Mark as read if not sent by me
         if (payload.new.sender_id !== currentUser?.id) {
